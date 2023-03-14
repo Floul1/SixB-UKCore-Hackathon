@@ -6,4 +6,4 @@ using SixB.Hackathon;
 Console.WriteLine("Hello, World!");
 
 var service = new ObservationService();
-await service.CreateObservation("123", "456", "789", "9234234599", 1.2m);
+await service.CreateObservation("RX7", "456", "789", "9234234599", 1.2m);
