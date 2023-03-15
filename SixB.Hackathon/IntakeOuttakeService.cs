@@ -72,7 +72,8 @@ public class IntakeOuttakeService
             Console.WriteLine(JsonConvert.SerializeObject(res));
             var episodeOfCare = res.Entry
                 .FirstOrDefault(x => x.Response != null && x.Response.Location.Contains("EpisodeOfCare"))?.Response;
-            if (episodeOfCare == null || !episodeOfCare.Status.Contains("201")) throw new NullReferenceException("Failed to create episode of care");
+            if (episodeOfCare == null || !episodeOfCare.Status.Contains("201"))
+                throw new NullReferenceException("Failed to create episode of care");
             return start.Id;
         }
         catch (FhirOperationException e)
@@ -122,7 +123,13 @@ public class IntakeOuttakeService
         });
         try
         {
-            var result = await _client.TransactionAsync(transactionBundle);
+            var serializer = new FhirJsonSerializer();
+            var serializeToString = serializer.SerializeToString(transactionBundle);
+            var creatEnc = serializer.SerializeToString(discharge);
+            var encEnc = serializer.SerializeToString(endOfEpisode);
+            var create = await _client.CreateAsync(discharge);
+            var enc = await _client.CreateAsync(endOfEpisode);
+            // var result = await _client.TransactionAsync(transactionBundle);
             Console.WriteLine("Patient has been discharged");
         }
         catch (Exception e)
@@ -130,8 +137,6 @@ public class IntakeOuttakeService
             Console.WriteLine(e);
             throw;
         }
-        
-        
     }
 
     /// <summary>
@@ -142,9 +147,14 @@ public class IntakeOuttakeService
     /// <returns></returns>
     private EpisodeOfCare GenerateStartOfEpisode(ResourceReference patientReference, string managingOds)
     {
+        var id = Guid.NewGuid().ToString();
         var episodeOfCare = new EpisodeOfCare
         {
-            Id = Guid.NewGuid().ToString(),
+            Id = id,
+            Identifier = new List<Identifier>(new[]
+            {
+                new Identifier("http://example.org/virtualward-identifier", id)
+            }),
             Status = EpisodeOfCare.EpisodeOfCareStatus.Active,
             Patient = patientReference,
             ManagingOrganization = new ResourceReference
@@ -175,13 +185,23 @@ public class IntakeOuttakeService
         return episodeOfCare;
     }
 
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="patientIdentifier"></param>
+    /// <returns></returns>
     private async Task<EpisodeOfCare?> GetAndEndEpisodeOfCare(string patientIdentifier)
     {
-        var eoc = await _client.GetAsync($"EpisodeOfCare?patient:identifier=https://fhir.nhs.uk/Id/nhs-number|{patientIdentifier}&status=active");
+        var eoc = await _client.GetAsync(
+            $"EpisodeOfCare?patient:identifier=https://fhir.nhs.uk/Id/nhs-number|{patientIdentifier}&status=active");
         if (eoc == null || eoc is not Bundle bundle) return null;
         if (!bundle.Any()) return null;
         var episodeOfCare = bundle.Entry.First().Resource as EpisodeOfCare;
         if (episodeOfCare == null) return null;
+        episodeOfCare.Identifier = new List<Identifier>(new[]
+        {
+            new Identifier("http://example.org/virtualward-identifier", episodeOfCare.Id)
+        });
         episodeOfCare.Status = EpisodeOfCare.EpisodeOfCareStatus.Finished;
         episodeOfCare.Period.EndElement = FhirDateTime.Now();
         return episodeOfCare;
@@ -190,9 +210,14 @@ public class IntakeOuttakeService
     private Encounter GenerateDischargeEncounter(ResourceReference dischargingClinicianIdentifier,
         ResourceReference patientIdentifier, ResourceReference episodeIdentifier, ResourceReference virtualWardProvider)
     {
+        var id = Guid.NewGuid().ToString();
         var enc = new Encounter
         {
-            Id = Guid.NewGuid().ToString(),
+            Id = id,
+            Identifier = new List<Identifier>(new[]
+            {
+                new Identifier("http://example.org/virtualward-identifier", id)
+            }),
             Subject = patientIdentifier,
             Status = Encounter.EncounterStatus.Finished,
             EpisodeOfCare = new List<ResourceReference>
@@ -200,8 +225,6 @@ public class IntakeOuttakeService
                 episodeIdentifier
             },
             Class = new Coding("http://terminology.hl7.org/CodeSystem/v3-ActCode", "VR", "Virtual"),
-            ServiceType = new CodeableConcept("http://snomed.info/sct", "58000006", "Discharge from Virtual Ward",
-                "Patient discharge"),
             Hospitalization = new Encounter.HospitalizationComponent
             {
                 AdmitSource = new CodeableConcept("https://fhir.hl7.org.uk/CodeSystem/UKCore-SourceOfAdmissionEngland",
@@ -223,9 +246,9 @@ public class IntakeOuttakeService
         var admissionExt = new Extension("https://fhir.hl7.org.uk/StructureDefinition/Extension-UKCore-AdmissionMethod",
             new CodeableConcept("https://fhir.hl7.org.uk/CodeSystem/UKCore-AdmissionMethodEngland", "99"));
         var dischargeExt = new Extension("https://fhir.hl7.org.uk/StructureDefinition/Extension-UKCore-DischargeMethod",
-            new FhirDecimal(1)); //Discharge under clinical advice
+            new CodeableConcept()); //Discharge under clinical advice
         enc.Extension.Add(admissionExt);
-        enc.Extension.Add(dischargeExt);
+        // enc.Extension.Add(dischargeExt);
         return enc;
     }
 
@@ -242,8 +265,6 @@ public class IntakeOuttakeService
                 episodeIdentifier
             },
             Class = new Coding("http://terminology.hl7.org/CodeSystem/v3-ActCode", "VR", "Virtual"),
-            ServiceType = new CodeableConcept("http://snomed.info/sct", "894881000000108", "Admitted to Virtual Ward",
-                "Admission to observation ward"),
             Hospitalization = new Encounter.HospitalizationComponent
             {
                 AdmitSource = new CodeableConcept("https://fhir.hl7.org.uk/CodeSystem/UKCore-SourceOfAdmissionEngland",
