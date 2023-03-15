@@ -200,7 +200,7 @@ public class IntakeOuttakeService
         if (episodeOfCare == null) return null;
         episodeOfCare.Identifier = new List<Identifier>(new[]
         {
-            new Identifier("http://example.org/virtualward-identifier", episodeOfCare.Id)
+            new Identifier("http://example.org/virtualward-identifier", episodeOfCare.Identifier.First().Value)
         });
         episodeOfCare.Status = EpisodeOfCare.EpisodeOfCareStatus.Finished;
         episodeOfCare.Period.EndElement = FhirDateTime.Now();
