@@ -7,3 +7,6 @@ Console.WriteLine("Hello, World!");
 
 var service = new ObservationService();
 await service.CreateObservation("RX7", "456", "789", "9234234599", 1.2m);
+var newService = new IntakeOuttakeService();
+await newService.AdmitPatientToVirtualWard("9234234599");
+await newService.DischargePatient("9234234599", "RX7");

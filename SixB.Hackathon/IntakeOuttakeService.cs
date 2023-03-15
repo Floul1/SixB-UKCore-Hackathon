@@ -1,5 +1,6 @@
 ﻿using Hl7.Fhir.Model;
 using Hl7.Fhir.Rest;
+using Newtonsoft.Json;
 using Task = System.Threading.Tasks.Task;
 
 namespace SixB.Hackathon;
@@ -23,7 +24,45 @@ public class IntakeOuttakeService
     {
         _client = new FhirClient("https://3cdzg7kbj4.execute-api.eu-west-2.amazonaws.com/poc/events/FHIR/R4/");
     }
+    
+    public async Task<string> AdmitPatientToVirtualWard(string nhsNumber)
+    {
+        var patient = new ResourceReference()
+        {
+            Identifier = new Identifier("https://fhir.nhs.uk/Id/nhs-number", nhsNumber)
+        };
+        var start = GenerateStartOfEpisode(patient, "RX7"); //Hardcoded for POC
+        var admit = GenerateAdmitEncounter(_doctorRef, patient, new ResourceReference($"urn:uuid:{start.Id}"), _personalWardTeam);
 
+        var transactionBundle = new Bundle
+        {
+            Type = Bundle.BundleType.Transaction
+        };
+        transactionBundle.Entry.Add(new Bundle.EntryComponent
+        {
+            Resource = start,
+            Request = new Bundle.RequestComponent
+            {
+                Url = "EpisodeOfCare",
+                Method = Bundle.HTTPVerb.POST
+            }
+        });
+        transactionBundle.Entry.Add(new Bundle.EntryComponent
+        {
+            Resource = admit,
+            Request = new Bundle.RequestComponent
+            {
+                Url = "Encounter",
+                Method = Bundle.HTTPVerb.POST
+            }
+        });
+        var res = await _client.TransactionAsync(transactionBundle);
+        if(res == null) throw new NullReferenceException("Failed to create episode of care");
+        Console.WriteLine(JsonConvert.SerializeObject(res));
+        var episodeOfCare = res.Entry.FirstOrDefault(x => x.Resource is EpisodeOfCare)?.Resource as EpisodeOfCare;
+        if (episodeOfCare == null) throw new NullReferenceException("Failed to create episode of care");
+        return episodeOfCare.Id;
+    }
     public async Task DischargePatient(string nhsNumber, string episodeOfCareIdentifier)
     {
         var patientIdentifier = new ResourceReference
@@ -152,6 +191,45 @@ public class IntakeOuttakeService
             new FhirDecimal(1)); //Discharge under clinical advice
         enc.Extension.Add(admissionExt);
         enc.Extension.Add(dischargeExt);
+        return enc;
+    }
+
+    private Encounter GenerateAdmitEncounter(ResourceReference admittingClinicianIdentifier,
+        ResourceReference patientIdentifier, ResourceReference episodeIdentifier, ResourceReference virtualWardProvider)
+    {
+        var enc = new Encounter
+        {
+            Id = Guid.NewGuid().ToString(),
+            Subject = patientIdentifier,
+            Status = Encounter.EncounterStatus.Finished,
+            EpisodeOfCare = new List<ResourceReference>
+            {
+                episodeIdentifier
+            },
+            Class = new Coding("http://terminology.hl7.org/CodeSystem/v3-ActCode", "VR", "Virtual"),
+            ServiceType = new CodeableConcept("http://snomed.info/sct", "894881000000108", "Admitted to Virtual Ward",
+                "Admission to observation ward"),
+            Hospitalization = new Encounter.HospitalizationComponent
+            {
+                AdmitSource = new CodeableConcept("https://fhir.hl7.org.uk/CodeSystem/UKCore-SourceOfAdmissionEngland",
+                    "99")
+            },
+            ServiceProvider = virtualWardProvider
+        };
+        var dischargingDoctor = new Encounter.ParticipantComponent
+        {
+            Type = //Attending Type
+                new List<CodeableConcept>
+                {
+                    new("http://terminology.hl7.org/CodeSystem/v3-ParticipationType", "ATND", "attender",
+                        "Attender")
+                },
+            Individual = admittingClinicianIdentifier
+        };
+        enc.Participant.Add(dischargingDoctor);
+        var admissionExt = new Extension("https://fhir.hl7.org.uk/StructureDefinition/Extension-UKCore-AdmissionMethod",
+            new CodeableConcept("https://fhir.hl7.org.uk/CodeSystem/UKCore-AdmissionMethodEngland", "99"));
+        enc.Extension.Add(admissionExt);
         return enc;
     }
 }
